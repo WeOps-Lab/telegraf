@@ -43,7 +43,16 @@ func NewConnection(server, privilege, hexKey string) *Connection {
 		inx3 := strings.Index(connstr, ")")
 
 		conn.Interface = connstr[0:inx2]
-		conn.Hostname = connstr[inx2+1 : inx3]
+		serverInfo := connstr[inx2+1 : inx3]
+		// split serverInfo into hostname and port
+		if strings.Contains(serverInfo, ":") {
+			hostPort := strings.SplitN(serverInfo, ":", 2)
+			conn.Hostname = hostPort[0]
+			conn.Port, _ = strconv.Atoi(hostPort[1])
+		} else {
+			conn.Hostname = serverInfo
+		}
+
 	}
 
 	return conn
