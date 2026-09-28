@@ -31,9 +31,6 @@ type BkliteScript struct {
 	Params      []string        `toml:"params"`
 	Script      string          `toml:"script"`
 	ScriptEnv   string          `toml:"script_env"`
-	ScriptFile  string          `toml:"script_file"`
-	Command     string          `toml:"command"`
-	Commands    []string        `toml:"commands"`
 	Environment []string        `toml:"environment"`
 	RunDir      string          `toml:"run_dir"`
 	RunAs       string          `toml:"run_as"`
@@ -65,11 +62,11 @@ func (b *BkliteScript) Init() error {
 		b.runTimeout = derivedTimeout(time.Duration(b.Interval))
 	}
 
-	if !b.hasWork() {
-		return errors.New("must set script, script_env, script_file, or command(s)")
+	if !b.usesScriptBody() {
+		return errors.New("must set script or script_env")
 	}
 
-	if b.usesScriptBody() && b.Interpreter == "" {
+	if b.Interpreter == "" {
 		interp, err := defaultInterpreter()
 		if err != nil {
 			return err
@@ -100,10 +97,6 @@ func (b *BkliteScript) Init() error {
 	return nil
 }
 
-func (b *BkliteScript) hasWork() bool {
-	return b.usesScriptBody() || b.ScriptFile != "" || b.Command != "" || len(b.Commands) > 0
-}
-
 func (b *BkliteScript) usesScriptBody() bool {
 	return b.Script != "" || b.ScriptEnv != ""
 }
@@ -113,7 +106,7 @@ func (b *BkliteScript) instanceID() string {
 		return sanitizeName(b.ScriptName)
 	}
 	h := sha256.Sum256([]byte(strings.Join([]string{
-		b.Script, b.ScriptEnv, b.ScriptFile, b.Command, strings.Join(b.Commands, "\x00"),
+		b.Script, b.ScriptEnv, b.Interpreter, strings.Join(b.Params, "\x00"),
 	}, "\x00")))
 	return hex.EncodeToString(h[:8])
 }
@@ -150,7 +143,7 @@ func (b *BkliteScript) Gather(acc telegraf.Accumulator) error {
 }
 
 func (b *BkliteScript) runLocked(acc telegraf.Accumulator, health *healthResult) {
-	commands, cleanup, err := b.prepareCommands()
+	argv, cleanup, err := b.prepareArgv()
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -162,35 +155,32 @@ func (b *BkliteScript) runLocked(acc telegraf.Accumulator, health *healthResult)
 	}
 
 	env := b.childEnv()
-	var series []telegraf.Metric
-	for _, argv := range commands {
-		res := b.runCommand(argv, env)
-		if res.stderr != "" {
-			b.logErrorf("stderr: %s", res.stderr)
-		}
-		if res.truncated {
-			health.truncated = 1
-		}
-		if res.err != nil && health.exitCode == 0 {
-			health.exitCode = res.exitCode
-			health.up = 0
-		} else if res.exitCode != 0 && health.exitCode == 0 {
-			health.exitCode = res.exitCode
-			health.up = 0
-		}
-
-		parsed, perr, trunc := b.parseStdout(res.stdout)
-		if perr != nil {
-			b.logErrorf("parse: %v", perr)
-			health.parseErrors = 1
-			health.up = 0
-		}
-		if trunc {
-			health.truncated = 1
-		}
-		series = append(series, parsed...)
+	res := b.runCommand(argv, env)
+	if res.stderr != "" {
+		b.logErrorf("stderr: %s", res.stderr)
+	}
+	if res.truncated {
+		health.truncated = 1
+	}
+	if res.err != nil && health.exitCode == 0 {
+		health.exitCode = res.exitCode
+		health.up = 0
+	} else if res.exitCode != 0 && health.exitCode == 0 {
+		health.exitCode = res.exitCode
+		health.up = 0
 	}
 
+	parsed, perr, trunc := b.parseStdout(res.stdout)
+	if perr != nil {
+		b.logErrorf("parse: %v", perr)
+		health.parseErrors = 1
+		health.up = 0
+	}
+	if trunc {
+		health.truncated = 1
+	}
+
+	series := parsed
 	if len(series) > platformMaxSeries {
 		series = series[:platformMaxSeries]
 		health.truncated = 1

@@ -57,6 +57,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## The variable is stripped from the child environment.
   # script_env = "BKLITE_SCRIPT_BODY"
 
+  ## command / commands / script_file are not supported (exec argv bypass).
+  ## Provide the script body via script or script_env only.
+
   ## Secrets for the child as "KEY=value". Do not put secrets in argv.
   # environment = ["TOKEN=secret"]
 
@@ -87,8 +90,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 - **Linux resource limits** (always applied, no disable flag):
   - memory: 256MiB (`cgroup v2 memory.max` when writable, plus `RLIMIT_AS`)
   - CPU time: `RLIMIT_CPU` equal to the derived timeout (seconds)
-  - processes: 64 via `cgroup v2 pids.max` when writable (`RLIMIT_NPROC` is
-    not used; it is a per-user cap and would break a busy Telegraf host)
+  - processes: 64 via `cgroup v2 pids.max` when writable; if cgroup setup
+    fails, `RLIMIT_NPROC=256` (per-UID ceiling) is applied so a fork bomb
+    cannot unbounded-spawn. Windows has no CPU/memory/nproc quotas.
 - **Lock**: exclusive per-instance file lock; overlapping gathers are skipped
   (`exit_code = 125`).
 - **Output caps**: 50 Prometheus series and 64KiB stdout.

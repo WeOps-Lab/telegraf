@@ -14,12 +14,14 @@ import (
 
 func applyResourceLimits(pid int, timeout time.Duration, log telegraf.Logger) func() {
 	var cleanup func()
+	cgroupOK := false
 	if fn, err := applyCgroupLimits(pid); err != nil {
 		if log != nil {
 			log.Debugf("cgroup v2 limits not applied: %v", err)
 		}
 	} else {
 		cleanup = fn
+		cgroupOK = true
 	}
 
 	mem := unix.Rlimit{Cur: platformMemoryLimitBytes, Max: platformMemoryLimitBytes}
@@ -31,6 +33,14 @@ func applyResourceLimits(pid int, timeout time.Duration, log telegraf.Logger) fu
 	cpulim := unix.Rlimit{Cur: cpu, Max: cpu}
 	if err := unix.Prlimit(pid, unix.RLIMIT_CPU, &cpulim, nil); err != nil && log != nil {
 		log.Debugf("prlimit RLIMIT_CPU: %v", err)
+	}
+
+	if !cgroupOK {
+		// Per-UID process ceiling when pids.max is unavailable.
+		nproc := unix.Rlimit{Cur: rlimitNprocFallback, Max: rlimitNprocFallback}
+		if err := unix.Prlimit(pid, unix.RLIMIT_NPROC, &nproc, nil); err != nil && log != nil {
+			log.Debugf("prlimit RLIMIT_NPROC: %v", err)
+		}
 	}
 	return cleanup
 }

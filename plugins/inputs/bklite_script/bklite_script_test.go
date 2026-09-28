@@ -42,7 +42,8 @@ func health(t *testing.T, acc *testutil.Accumulator) map[string]interface{} {
 
 func TestTimeoutSetsExitCode(t *testing.T) {
 	p := newTestPlugin(t)
-	p.Command = "sleep 5"
+	p.Interpreter = "/bin/sh"
+	p.Script = "sleep 5"
 	p.runTimeout = 200 * time.Millisecond
 	require.NoError(t, p.Init())
 
@@ -97,7 +98,7 @@ func TestRootRefuseLinux(t *testing.T) {
 	p := New()
 	p.Log = testutil.Logger{}
 	p.RunDir = t.TempDir()
-	p.Command = "true"
+	p.Script = "true"
 	p.runTimeout = time.Second
 	p.RunAs = ""
 	require.ErrorContains(t, p.Init(), "refusing to run as root")
@@ -105,7 +106,7 @@ func TestRootRefuseLinux(t *testing.T) {
 	pRoot := New()
 	pRoot.Log = testutil.Logger{}
 	pRoot.RunDir = t.TempDir()
-	pRoot.Command = "true"
+	pRoot.Script = "true"
 	pRoot.runTimeout = time.Second
 	pRoot.RunAs = "root"
 	require.ErrorContains(t, pRoot.Init(), "refusing to run as root")
@@ -113,7 +114,7 @@ func TestRootRefuseLinux(t *testing.T) {
 	p2 := New()
 	p2.Log = testutil.Logger{}
 	p2.RunDir = t.TempDir()
-	p2.Command = "true"
+	p2.Script = "true"
 	p2.runTimeout = time.Second
 	p2.RunAs = "nobody"
 	require.NoError(t, p2.Init())
@@ -129,7 +130,7 @@ func TestRootRefuseUIDZeroAliasAtInit(t *testing.T) {
 	p := New()
 	p.Log = testutil.Logger{}
 	p.RunDir = t.TempDir()
-	p.Command = "true"
+	p.Script = "true"
 	p.runTimeout = time.Second
 	p.RunAs = "toor"
 	err := p.Init()
@@ -220,9 +221,10 @@ func TestMaxSeriesTruncated(t *testing.T) {
 	require.Equal(t, int64(1), h["truncated"])
 }
 
-func TestGatherNeverErrorsOnCommandFailure(t *testing.T) {
+func TestGatherNeverErrorsOnScriptFailure(t *testing.T) {
 	p := newTestPlugin(t)
-	p.Command = "/bin/false"
+	p.Interpreter = "/bin/sh"
+	p.Script = "exit 1"
 	require.NoError(t, p.Init())
 
 	var acc testutil.Accumulator
@@ -242,7 +244,7 @@ func TestPluginRegistered(t *testing.T) {
 
 func TestInitRequiresWork(t *testing.T) {
 	p := newTestPlugin(t)
-	require.Error(t, p.Init())
+	require.ErrorContains(t, p.Init(), "must set script or script_env")
 }
 
 func TestIntervalMinimum(t *testing.T) {

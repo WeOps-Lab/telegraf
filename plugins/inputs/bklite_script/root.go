@@ -15,6 +15,12 @@ const (
 	platformMaxSeries        = 50
 	platformMaxOutputBytes   = 64 * 1024
 
+	// rlimitNprocFallback is used only when cgroup v2 pids.max cannot be
+	// applied. RLIMIT_NPROC is a per-UID total (not a per-child tree), so
+	// 256 allows /bin/sh plus helpers on a typical telegraf host while
+	// still bounding a fork bomb.
+	rlimitNprocFallback = 256
+
 	// GNU timeout-style codes so operators can tell timeout/skip from the script.
 	exitTimeout  = 124
 	exitLockBusy = 125
