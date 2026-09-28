@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -19,8 +18,8 @@ func defaultInterpreter() (string, error) {
 }
 
 func (b *BkliteScript) initUser() error {
-	if b.User != "" {
-		return errors.New("user privilege drop is not supported on windows; run the Telegraf service under the desired account")
+	if b.RunAs != "" {
+		return errors.New("run_as is not supported on windows; run the Telegraf service under the desired account")
 	}
 	return nil
 }
@@ -29,14 +28,7 @@ func (b *BkliteScript) chownScript(string) error {
 	return nil
 }
 
-func (b *BkliteScript) runCommand(
-	argv []string,
-	env []string,
-	timeout time.Duration,
-	_ int64,
-	_ int,
-	maxOut int,
-) runResult {
+func (b *BkliteScript) runCommand(argv []string, env []string) runResult {
 	if len(argv) == 0 {
 		return startErrorResult(errors.New("empty command"))
 	}
@@ -47,7 +39,7 @@ func (b *BkliteScript) runCommand(
 	}
 
 	var stdout cappedBuffer
-	stdout.max = maxOut
+	stdout.max = platformMaxOutputBytes
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -55,7 +47,7 @@ func (b *BkliteScript) runCommand(
 	if err := cmd.Start(); err != nil {
 		return startErrorResult(err)
 	}
-	return waitAndCollect(cmd, timeout, &stdout, &stderr)
+	return waitAndCollect(cmd, b.runTimeout, &stdout, &stderr)
 }
 
 func (b *BkliteScript) withLock(fn func()) (bool, error) {

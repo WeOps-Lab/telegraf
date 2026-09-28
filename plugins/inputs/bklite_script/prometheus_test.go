@@ -3,6 +3,7 @@ package bklite_script
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -31,13 +32,19 @@ func TestPrometheusMetricName(t *testing.T) {
 }
 
 func TestCheckRootPermission(t *testing.T) {
-	require.Error(t, checkRootPermission(0, "", false))
-	require.Error(t, checkRootPermission(0, "root", false))
-	require.Error(t, checkRootPermission(1000, "root", false))
-	require.NoError(t, checkRootPermission(0, "nobody", false))
-	require.NoError(t, checkRootPermission(0, "", true))
-	require.NoError(t, checkRootPermission(0, "root", true))
-	require.NoError(t, checkRootPermission(1000, "", false))
+	require.Error(t, checkRootPermission(0, ""))
+	require.Error(t, checkRootPermission(0, "root"))
+	require.Error(t, checkRootPermission(1000, "root"))
+	require.NoError(t, checkRootPermission(0, "nobody"))
+	require.NoError(t, checkRootPermission(1000, ""))
+	require.NoError(t, checkRootPermission(1000, "telegraf"))
+}
+
+func TestDerivedTimeout(t *testing.T) {
+	require.Equal(t, 59*time.Second, derivedTimeout(60*time.Second))
+	require.Equal(t, 119*time.Second, derivedTimeout(120*time.Second))
+	require.Error(t, validateInterval(10*time.Second))
+	require.NoError(t, validateInterval(60*time.Second))
 }
 
 func TestSanitizeName(t *testing.T) {

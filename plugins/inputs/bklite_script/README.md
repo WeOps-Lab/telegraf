@@ -2,11 +2,12 @@
 
 The `bklite_script` plugin runs a user-provided script on each collection
 interval and parses **Prometheus text exposition** from stdout. It is the
-BlueKing Lite script-monitoring input: a hardened alternative to `inputs.exec`
-for running operator scripts.
+BlueKing Lite script-monitoring input.
 
-`inputs.exec` is unchanged. Use `[[inputs.exec]]` when you need arbitrary
-data formats or globbed command lists without BKLite's security controls.
+`inputs.exec` is unchanged.
+
+BKLite child configs should only set the user-facing fields below. Sandbox
+limits, timeout, and root policy are **fixed in the plugin** (not toggles).
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
@@ -20,141 +21,87 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ## Configuration
 
 ```toml @sample.conf
-# BKLite script monitoring: run a user script on an interval and collect
-# Prometheus text metrics from stdout. Failures are reported via health
-# metrics; Gather itself does not fail the Telegraf pipeline.
+# BKLite script monitoring: run a user script on each collection interval
+# and collect Prometheus text metrics from stdout. Gather never fails the
+# Telegraf pipeline; failures are reported via bklite_script health metrics.
+#
+# Platform-enforced (not configurable in this plugin):
+#   - timeout = interval - 1s (set interval >= 60s)
+#   - Linux: refuse to run as root; drop to run_as when Telegraf is root
+#   - Linux: CPU / memory / process limits (cgroup v2 and/or setrlimit)
+#   - per-instance file lock (no overlapping runs)
+#   - script body is never placed in process argv
 [[inputs.bklite_script]]
+  ## Collection interval. Must be at least 60s. Child timeout is interval-1s.
+  interval = "60s"
+
   ## Optional name used as the "script" tag on health and parsed metrics.
   # script_name = ""
 
-  ## Interpreter used to execute a materialized script file (argv[0]).
-  ## The script body is written to a private temp file under run_dir; argv
-  ## contains only the interpreter, optional args, and that path (no script
-  ## text, so `ps` cannot leak secrets). Default on Unix: "/bin/sh".
+  ## Interpreter used to execute the materialized script file (argv[0]).
+  ## The script body is written to a private temp file; argv contains only
+  ## the interpreter, params, and that path. Default on Unix: "/bin/sh".
   ## On Windows this is required when using script / script_env.
   # interpreter = "/bin/sh"
 
-  ## Extra arguments inserted between the interpreter and the script path.
-  ##   example: interpreter_args = ["-u"]
-  # interpreter_args = []
+  ## Extra arguments between the interpreter and the script path.
+  ##   example: params = ["-u"]
+  # params = []
 
-  ## Inline script body. Prefer this or script_env over embedding the script
-  ## in a command string.
-  # script = """
-  # echo 'my_metric 1'
-  # """
+  ## Inline script body (preferred). Never appears in `ps` argv.
+  script = """
+  echo 'my_metric 1'
+  """
 
-  ## Environment variable whose value is the script body. The variable is
-  ## stripped from the child environment so the body is not copied into the
-  ## child argv or (unnecessarily) the child environ.
+  ## Alternative: environment variable whose value is the script body.
+  ## The variable is stripped from the child environment.
   # script_env = "BKLITE_SCRIPT_BODY"
 
-  ## Existing script file to execute (path only). Used when the body is not
-  ## provided via script / script_env.
-  # script_file = ""
+  ## Secrets for the child as "KEY=value". Do not put secrets in argv.
+  # environment = ["TOKEN=secret"]
 
-  ## Exec-style command fallback (single string or array). The command is
-  ## still subject to timeout, lock, privilege drop, and resource limits, but
-  ## the command string is visible in `ps`. Prefer script / script_env for
-  ## secrets. Glob expansion of the first token matches inputs.exec.
-  # command = ""
-  # commands = []
-
-  ## Child environment ("KEY=value"). Put secrets here, not in argv.
-  # environment = []
-
-  ## Private directory for temp scripts and the instance lock file.
-  ## Created with mode 0700 if missing. Default: ${TMPDIR}/bklite_script
-  # run_dir = ""
-
-  ## Linux: user to run the child as. When Telegraf is root this is required
-  ## unless allow_root = true. Switching user requires Telegraf itself to be
-  ## root. Windows: not supported; run the Telegraf service under the desired
-  ## account.
-  # user = ""
-
-  ## Linux: allow the child to run as root. Default false.
-  # allow_root = false
-
-  ## Timeout. On expiry Linux kills the process group (SIGTERM then SIGKILL);
-  ## Windows kills the process best-effort (grandchildren may survive).
-  # timeout = "5s"
-
-  ## Resource limits (best-effort, Linux only).
-  ## memory_limit: cgroup v2 memory.max when writable, plus RLIMIT_AS
-  ## (address-space) via prlimit. 0 = unlimited.
-  ## cpu_limit_seconds: RLIMIT_CPU CPU-time seconds via prlimit. 0 = unlimited.
-  ## Windows: ignored.
-  # memory_limit = "0"
-  # cpu_limit_seconds = 0
-
-  ## Max Prometheus series kept from stdout (health metrics are extra).
-  # max_series = 50
-
-  ## Truncate stdout after this many bytes before parsing.
-  # max_output_bytes = "64KiB"
+  ## Linux: non-root account to run the script as. Required when Telegraf
+  ## is running as root. Root / "root" is always refused.
+  ## Windows: ignored; run the Telegraf service under the desired account.
+  # run_as = "telegraf"
 ```
+
+### User-facing fields
+
+| Field | Notes |
+|-------|--------|
+| `interval` | Required, **≥ 60s**. Telegraf collection interval for this input. |
+| `script` / `script_env` | Script body. Written to a private file; **not** in argv. |
+| `interpreter` / `params` | How the file is executed. |
+| `environment` | Secrets (`KEY=value`) for the child. |
+| `run_as` | Linux non-root user. Windows: not supported (service account). |
+
+### Platform-enforced behavior (fixed)
+
+- **Timeout** = `interval - 1s`. There is no user `timeout` knob.
+- **Linux root**: Init fails if the child would run as root. When Telegraf is
+  root, set `run_as` to a non-root account; the child is launched with
+  `setuid`/`setgid`. There is no `allow_root` flag.
+- **Linux resource limits** (always applied, no disable flag):
+  - memory: 256MiB (`cgroup v2 memory.max` when writable, plus `RLIMIT_AS`)
+  - CPU time: `RLIMIT_CPU` equal to the derived timeout (seconds)
+  - processes: 64 via `cgroup v2 pids.max` when writable (`RLIMIT_NPROC` is
+    not used; it is a per-user cap and would break a busy Telegraf host)
+- **Lock**: exclusive per-instance file lock; overlapping gathers are skipped
+  (`exit_code = 125`).
+- **Output caps**: 50 Prometheus series and 64KiB stdout.
+
+Windows: no user switch and no cgroup/setrlimit; timeout kill is
+`Process.Kill()` (best-effort). Run the Telegraf service under the desired
+account.
 
 ### How the script is launched
 
-When `script`, `script_env`, or `script_file` is set, Telegraf writes the body
-(if any) to a file under `run_dir` with mode `0600` and executes:
-
 ```text
-<interpreter> [interpreter_args...] <script_path>
+<interpreter> [params...] <private_script_path>
 ```
 
-The script text is never placed in process argv. Secrets should be passed with
-`environment` (or the Telegraf process environment), not baked into a
-`bash -c '...'` command.
-
-`command` / `commands` remain available for existing files already on disk
-(same idea as `inputs.exec`) but **are visible in `ps`**. Prefer `script` /
-`script_env` when the body or secrets must not leak via argv.
-
-### Privilege drop (Linux)
-
-If Telegraf is running as root, the plugin **refuses to start** unless you set
-`user` to a non-root account or set `allow_root = true`. The child is launched
-with `setuid`/`setgid` via `SysProcAttr.Credential`.
-
-Windows cannot drop privileges inside the plugin; run the Telegraf service
-under the desired account.
-
-### Timeouts and process groups
-
-Linux: the child is placed in its own process group. On timeout the group is
-sent SIGTERM, then SIGKILL (same pattern as `inputs.exec`).
-
-Windows: `Process.Kill()` on the child (best-effort; grandchildren may remain).
-
-### Resource limits (Linux, best-effort)
-
-| Knob | Mechanism |
-|------|-----------|
-| `memory_limit` | cgroup v2 `memory.max` when `/sys/fs/cgroup` is writable; always also `prlimit` `RLIMIT_AS` |
-| `cpu_limit_seconds` | `prlimit` `RLIMIT_CPU` (CPU seconds, not quota/bandwidth) |
-
-Applying limits after `Start()` is racy for a process that immediately
-allocates; treat this as a backstop, not a hard sandbox. If cgroup v2 is not
-delegated to Telegraf, only `setrlimit`/`prlimit` is used.
-
-Windows: limits are ignored.
-
-### Concurrency
-
-Each plugin instance takes an exclusive flock (Windows: `LockFileEx`) on a
-file under `run_dir`. If the previous interval is still running, this gather
-is skipped (`exit_code = 125`) and health metrics are still emitted.
-
-### Output handling
-
-Stdout is treated as Prometheus text. Missing `# TYPE` lines are inserted as
-`untyped`. Output larger than `max_output_bytes` is truncated; more than
-`max_series` series are dropped. `truncated=1` is set in either case.
-
-On parse or script failure **Gather still returns nil** so the Telegraf
-pipeline keeps running. Inspect health metrics.
+Secrets belong in `environment`, not in a `bash -c '...'` command string.
 
 ## Metrics
 
@@ -169,23 +116,17 @@ Health measurement `bklite_script` (Prometheus names `bklite_script_*`):
 
 Tag: `script` = `script_name` (or `default`).
 
-Plus whatever series the script prints, tagged with `script` as well.
-
 ## Example
 
 ```toml
 [[inputs.bklite_script]]
+  interval = "60s"
   script_name = "disk_check"
-  timeout = "5s"
-  user = "telegraf"
+  run_as = "telegraf"
+  interpreter = "/bin/sh"
+  environment = ["TOKEN=secret"]
   script = '''
 echo '# TYPE my_free_bytes gauge'
 echo 'my_free_bytes 123'
   '''
-```
-
-Example health output:
-
-```text
-bklite_script,script=disk_check up=1i,duration_seconds=0.02,exit_code=0i,parse_errors=0i,truncated=0i
 ```

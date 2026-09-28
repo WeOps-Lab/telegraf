@@ -11,7 +11,6 @@ import (
 	"os/user"
 	"strconv"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -23,26 +22,26 @@ func defaultInterpreter() (string, error) {
 }
 
 func (b *BkliteScript) initUser() error {
-	if err := checkRootPermission(osGeteuid(), b.User, b.AllowRoot); err != nil {
+	if err := checkRootPermission(osGeteuid(), b.RunAs); err != nil {
 		return err
 	}
-	if b.User == "" {
+	if b.RunAs == "" {
 		return nil
 	}
 	if osGeteuid() != 0 {
-		return fmt.Errorf("cannot switch to user %q: telegraf is not running as root", b.User)
+		return fmt.Errorf("cannot switch to user %q: telegraf is not running as root", b.RunAs)
 	}
-	u, err := user.Lookup(b.User)
+	u, err := user.Lookup(b.RunAs)
 	if err != nil {
-		return wrapUserLookup(b.User, err)
+		return wrapUserLookup(b.RunAs, err)
 	}
 	uid, err := strconv.ParseUint(u.Uid, 10, 32)
 	if err != nil {
-		return fmt.Errorf("parsing uid for %q: %w", b.User, err)
+		return fmt.Errorf("parsing uid for %q: %w", b.RunAs, err)
 	}
 	gid, err := strconv.ParseUint(u.Gid, 10, 32)
 	if err != nil {
-		return fmt.Errorf("parsing gid for %q: %w", b.User, err)
+		return fmt.Errorf("parsing gid for %q: %w", b.RunAs, err)
 	}
 	b.uid = uint32(uid)
 	b.gid = uint32(gid)
@@ -60,14 +59,7 @@ func (b *BkliteScript) chownScript(path string) error {
 	return nil
 }
 
-func (b *BkliteScript) runCommand(
-	argv []string,
-	env []string,
-	timeout time.Duration,
-	memoryBytes int64,
-	cpuSeconds int,
-	maxOut int,
-) runResult {
+func (b *BkliteScript) runCommand(argv []string, env []string) runResult {
 	if len(argv) == 0 {
 		return startErrorResult(errors.New("empty command"))
 	}
@@ -80,7 +72,7 @@ func (b *BkliteScript) runCommand(
 	cmd.SysProcAttr = sys
 
 	var stdout cappedBuffer
-	stdout.max = maxOut
+	stdout.max = platformMaxOutputBytes
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -88,11 +80,11 @@ func (b *BkliteScript) runCommand(
 	if err := cmd.Start(); err != nil {
 		return startErrorResult(err)
 	}
-	cleanup := applyResourceLimits(cmd.Process.Pid, memoryBytes, cpuSeconds, b.Log)
+	cleanup := applyResourceLimits(cmd.Process.Pid, b.runTimeout, b.Log)
 	if cleanup != nil {
 		defer cleanup()
 	}
-	return waitAndCollect(cmd, timeout, &stdout, &stderr)
+	return waitAndCollect(cmd, b.runTimeout, &stdout, &stderr)
 }
 
 func (b *BkliteScript) withLock(fn func()) (bool, error) {

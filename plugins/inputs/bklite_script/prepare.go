@@ -16,7 +16,7 @@ func (b *BkliteScript) prepareCommands() ([][]string, func(), error) {
 		if err != nil {
 			return nil, cleanup, err
 		}
-		argv := append([]string{b.Interpreter}, b.InterpreterArgs...)
+		argv := append([]string{b.Interpreter}, b.Params...)
 		argv = append(argv, path)
 		return [][]string{argv}, cleanup, nil
 	}
@@ -25,7 +25,7 @@ func (b *BkliteScript) prepareCommands() ([][]string, func(), error) {
 		if b.Interpreter == "" {
 			return [][]string{{b.ScriptFile}}, nil, nil
 		}
-		argv := append([]string{b.Interpreter}, b.InterpreterArgs...)
+		argv := append([]string{b.Interpreter}, b.Params...)
 		argv = append(argv, b.ScriptFile)
 		return [][]string{argv}, nil, nil
 	}

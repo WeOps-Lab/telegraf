@@ -21,8 +21,9 @@ func newTestPlugin(t *testing.T) *BkliteScript {
 	p := New()
 	p.Log = testutil.Logger{Name: "bklite_script"}
 	p.RunDir = t.TempDir()
+	p.runTimeout = 5 * time.Second
 	if os.Geteuid() == 0 {
-		p.AllowRoot = true
+		p.RunAs = "nobody"
 	}
 	return p
 }
@@ -41,7 +42,7 @@ func health(t *testing.T, acc *testutil.Accumulator) map[string]interface{} {
 func TestTimeoutSetsExitCode(t *testing.T) {
 	p := newTestPlugin(t)
 	p.Command = "sleep 5"
-	p.Timeout = config.Duration(200 * time.Millisecond)
+	p.runTimeout = 200 * time.Millisecond
 	require.NoError(t, p.Init())
 
 	var acc testutil.Accumulator
@@ -57,9 +58,10 @@ func TestLockPreventsOverlap(t *testing.T) {
 	p := newTestPlugin(t)
 	p.ScriptName = "locktest"
 	marker := filepath.Join(t.TempDir(), "started")
+	require.NoError(t, os.Chmod(filepath.Dir(marker), 0777))
 	p.Interpreter = "/bin/sh"
 	p.Script = "echo started > " + marker + "\nsleep 5\n"
-	p.Timeout = config.Duration(8 * time.Second)
+	p.runTimeout = 8 * time.Second
 	require.NoError(t, p.Init())
 
 	var acc1, acc2 testutil.Accumulator
@@ -95,14 +97,24 @@ func TestRootRefuseLinux(t *testing.T) {
 	p.Log = testutil.Logger{}
 	p.RunDir = t.TempDir()
 	p.Command = "true"
-	p.AllowRoot = false
+	p.runTimeout = time.Second
+	p.RunAs = ""
 	require.ErrorContains(t, p.Init(), "refusing to run as root")
+
+	pRoot := New()
+	pRoot.Log = testutil.Logger{}
+	pRoot.RunDir = t.TempDir()
+	pRoot.Command = "true"
+	pRoot.runTimeout = time.Second
+	pRoot.RunAs = "root"
+	require.ErrorContains(t, pRoot.Init(), "refusing to run as root")
 
 	p2 := New()
 	p2.Log = testutil.Logger{}
 	p2.RunDir = t.TempDir()
 	p2.Command = "true"
-	p2.AllowRoot = true
+	p2.runTimeout = time.Second
+	p2.RunAs = "nobody"
 	require.NoError(t, p2.Init())
 }
 
@@ -143,6 +155,7 @@ func TestSuccessfulPrometheusScript(t *testing.T) {
 
 func TestScriptBodyNotInArgv(t *testing.T) {
 	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0777))
 	out := filepath.Join(dir, "cmdline")
 	p := newTestPlugin(t)
 	p.Interpreter = "/bin/sh"
@@ -177,9 +190,8 @@ func TestScriptEnvNotPassedToChild(t *testing.T) {
 
 func TestMaxSeriesTruncated(t *testing.T) {
 	p := newTestPlugin(t)
-	p.MaxSeries = 3
 	p.Interpreter = "/bin/sh"
-	p.Script = "echo 'a 1'; echo 'b 1'; echo 'c 1'; echo 'd 1'; echo 'e 1'"
+	p.Script = "i=1; while [ $i -le 51 ]; do echo \"m$i 1\"; i=$((i+1)); done"
 	require.NoError(t, p.Init())
 
 	var acc testutil.Accumulator
@@ -211,4 +223,26 @@ func TestPluginRegistered(t *testing.T) {
 func TestInitRequiresWork(t *testing.T) {
 	p := newTestPlugin(t)
 	require.Error(t, p.Init())
+}
+
+func TestIntervalMinimum(t *testing.T) {
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = t.TempDir()
+	p.Script = "echo 'x 1'"
+	p.Interval = config.Duration(10 * time.Second)
+	require.ErrorContains(t, p.Init(), "interval must be at least")
+}
+
+func TestTimeoutDerivedFromInterval(t *testing.T) {
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = t.TempDir()
+	p.Script = "echo 'x 1'"
+	p.Interval = config.Duration(60 * time.Second)
+	if os.Geteuid() == 0 {
+		p.RunAs = "nobody"
+	}
+	require.NoError(t, p.Init())
+	require.Equal(t, 59*time.Second, p.runTimeout)
 }

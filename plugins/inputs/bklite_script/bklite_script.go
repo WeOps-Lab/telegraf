@@ -23,38 +23,25 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-const (
-	defaultMaxSeries      = 50
-	defaultMaxOutputBytes = 64 * 1024
-	defaultTimeout        = 5 * time.Second
-
-	// GNU timeout-style codes so operators can tell timeout/skip from the script.
-	exitTimeout  = 124
-	exitLockBusy = 125
-	exitNoStart  = 127
-)
-
 // BkliteScript runs a user script and collects Prometheus metrics from stdout.
 type BkliteScript struct {
-	ScriptName      string          `toml:"script_name"`
-	Interpreter     string          `toml:"interpreter"`
-	InterpreterArgs []string        `toml:"interpreter_args"`
-	Script          string          `toml:"script"`
-	ScriptEnv       string          `toml:"script_env"`
-	ScriptFile      string          `toml:"script_file"`
-	Command         string          `toml:"command"`
-	Commands        []string        `toml:"commands"`
-	Environment     []string        `toml:"environment"`
-	RunDir          string          `toml:"run_dir"`
-	User            string          `toml:"user"`
-	AllowRoot       bool            `toml:"allow_root"`
-	Timeout         config.Duration `toml:"timeout"`
-	MemoryLimit     config.Size     `toml:"memory_limit"`
-	CPULimitSeconds int             `toml:"cpu_limit_seconds"`
-	MaxSeries       int             `toml:"max_series"`
-	MaxOutputBytes  config.Size     `toml:"max_output_bytes"`
-	Log             telegraf.Logger `toml:"-"`
+	Interval    config.Duration `toml:"interval"`
+	ScriptName  string          `toml:"script_name"`
+	Interpreter string          `toml:"interpreter"`
+	Params      []string        `toml:"params"`
+	Script      string          `toml:"script"`
+	ScriptEnv   string          `toml:"script_env"`
+	ScriptFile  string          `toml:"script_file"`
+	Command     string          `toml:"command"`
+	Commands    []string        `toml:"commands"`
+	Environment []string        `toml:"environment"`
+	RunDir      string          `toml:"run_dir"`
+	RunAs       string          `toml:"run_as"`
+	Log         telegraf.Logger `toml:"-"`
 
+	// runTimeout is interval-1s after Init. Tests may set it before Init to
+	// avoid waiting a full minute.
+	runTimeout    time.Duration
 	lockPath      string
 	hasCredential bool
 	uid           uint32
@@ -63,11 +50,7 @@ type BkliteScript struct {
 }
 
 func New() *BkliteScript {
-	return &BkliteScript{
-		Timeout:        config.Duration(defaultTimeout),
-		MaxSeries:      defaultMaxSeries,
-		MaxOutputBytes: config.Size(defaultMaxOutputBytes),
-	}
+	return &BkliteScript{}
 }
 
 func (*BkliteScript) SampleConfig() string {
@@ -75,14 +58,11 @@ func (*BkliteScript) SampleConfig() string {
 }
 
 func (b *BkliteScript) Init() error {
-	if b.Timeout <= 0 {
-		b.Timeout = config.Duration(defaultTimeout)
-	}
-	if b.MaxSeries <= 0 {
-		b.MaxSeries = defaultMaxSeries
-	}
-	if b.MaxOutputBytes <= 0 {
-		b.MaxOutputBytes = config.Size(defaultMaxOutputBytes)
+	if b.runTimeout == 0 {
+		if err := validateInterval(time.Duration(b.Interval)); err != nil {
+			return err
+		}
+		b.runTimeout = derivedTimeout(time.Duration(b.Interval))
 	}
 
 	if !b.hasWork() {
@@ -184,7 +164,7 @@ func (b *BkliteScript) runLocked(acc telegraf.Accumulator, health *healthResult)
 	env := b.childEnv()
 	var series []telegraf.Metric
 	for _, argv := range commands {
-		res := b.runCommand(argv, env, time.Duration(b.Timeout), int64(b.MemoryLimit), b.CPULimitSeconds, int(b.MaxOutputBytes))
+		res := b.runCommand(argv, env)
 		if res.stderr != "" {
 			b.logErrorf("stderr: %s", res.stderr)
 		}
@@ -211,8 +191,8 @@ func (b *BkliteScript) runLocked(acc telegraf.Accumulator, health *healthResult)
 		series = append(series, parsed...)
 	}
 
-	if len(series) > b.MaxSeries {
-		series = series[:b.MaxSeries]
+	if len(series) > platformMaxSeries {
+		series = series[:platformMaxSeries]
 		health.truncated = 1
 	}
 	tag := b.scriptTag()
@@ -223,19 +203,18 @@ func (b *BkliteScript) runLocked(acc telegraf.Accumulator, health *healthResult)
 }
 
 func (b *BkliteScript) parseStdout(stdout []byte) ([]telegraf.Metric, error, bool) {
-	truncated := false
 	if len(stdout) == 0 {
 		return nil, nil, false
 	}
 	data := ensurePrometheusTypes(stdout)
 	metrics, err := b.parser.Parse(data)
 	if err != nil {
-		return nil, err, truncated
+		return nil, err, false
 	}
-	if len(metrics) > b.MaxSeries {
-		return metrics[:b.MaxSeries], nil, true
+	if len(metrics) > platformMaxSeries {
+		return metrics[:platformMaxSeries], nil, true
 	}
-	return metrics, nil, truncated
+	return metrics, nil, false
 }
 
 func (b *BkliteScript) childEnv() []string {

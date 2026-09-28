@@ -3,20 +3,54 @@ package bklite_script
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
-// checkRootPermission refuses to run a child as root unless allowRoot is set.
-// euid is the Telegraf effective uid; username is the configured target user.
-func checkRootPermission(euid int, username string, allowRoot bool) error {
-	if allowRoot {
-		return nil
+const (
+	minInterval = 60 * time.Second
+
+	// Fixed BKLite sandbox defaults; not user-configurable.
+	platformMemoryLimitBytes = 256 * 1024 * 1024
+	platformNprocLimit       = 64
+	platformMaxSeries        = 50
+	platformMaxOutputBytes   = 64 * 1024
+
+	// GNU timeout-style codes so operators can tell timeout/skip from the script.
+	exitTimeout  = 124
+	exitLockBusy = 125
+	exitNoStart  = 127
+)
+
+func derivedTimeout(interval time.Duration) time.Duration {
+	if interval <= time.Second {
+		return interval
 	}
-	targetRoot := username == "" || username == "root"
-	if euid == 0 && targetRoot {
-		return errors.New("refusing to run as root; set user to a non-root account or allow_root = true")
+	return interval - time.Second
+}
+
+func validateInterval(interval time.Duration) error {
+	if interval < minInterval {
+		return fmt.Errorf("interval must be at least %s (got %s)", minInterval, interval)
 	}
+	return nil
+}
+
+func cpuLimitSeconds(timeout time.Duration) int {
+	sec := int(timeout / time.Second)
+	if sec < 1 {
+		return 1
+	}
+	return sec
+}
+
+// checkRootPermission refuses to run a child as root. euid is Telegraf's
+// effective uid; username is the configured run_as target.
+func checkRootPermission(euid int, username string) error {
 	if username == "root" {
-		return errors.New("refusing to run as root; set user to a non-root account or allow_root = true")
+		return errors.New("refusing to run as root; set run_as to a non-root account")
+	}
+	if euid == 0 && username == "" {
+		return errors.New("refusing to run as root; set run_as to a non-root account")
 	}
 	return nil
 }
