@@ -4,6 +4,7 @@ package bklite_script
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -116,6 +117,25 @@ func TestRootRefuseLinux(t *testing.T) {
 	p2.runTimeout = time.Second
 	p2.RunAs = "nobody"
 	require.NoError(t, p2.Init())
+}
+
+func TestRootRefuseUIDZeroAliasAtInit(t *testing.T) {
+	origLookup := lookupUser
+	lookupUser = func(string) (*user.User, error) {
+		return &user.User{Uid: "0", Gid: "0", Username: "toor"}, nil
+	}
+	t.Cleanup(func() { lookupUser = origLookup })
+
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = t.TempDir()
+	p.Command = "true"
+	p.runTimeout = time.Second
+	p.RunAs = "toor"
+	err := p.Init()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "uid 0")
+	require.False(t, p.hasCredential)
 }
 
 func TestHealthMetricsOnFailure(t *testing.T) {

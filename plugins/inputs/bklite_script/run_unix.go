@@ -16,6 +16,7 @@ import (
 )
 
 var osGeteuid = os.Geteuid
+var lookupUser = user.Lookup
 
 func defaultInterpreter() (string, error) {
 	return "/bin/sh", nil
@@ -26,25 +27,35 @@ func (b *BkliteScript) initUser() error {
 		return err
 	}
 	if b.RunAs == "" {
+		// Already refused if euid is 0; run as the current non-root user.
+		return nil
+	}
+
+	u, err := lookupUser(b.RunAs)
+	if err != nil {
+		return wrapUserLookup(b.RunAs, err)
+	}
+	uid64, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parsing uid for %q: %w", b.RunAs, err)
+	}
+	uid := uint32(uid64)
+	if err := refuseIfRootUID(uid, b.RunAs); err != nil {
+		return err
+	}
+	gid64, err := strconv.ParseUint(u.Gid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parsing gid for %q: %w", b.RunAs, err)
+	}
+
+	if osGeteuid() == int(uid) {
 		return nil
 	}
 	if osGeteuid() != 0 {
 		return fmt.Errorf("cannot switch to user %q: telegraf is not running as root", b.RunAs)
 	}
-	u, err := user.Lookup(b.RunAs)
-	if err != nil {
-		return wrapUserLookup(b.RunAs, err)
-	}
-	uid, err := strconv.ParseUint(u.Uid, 10, 32)
-	if err != nil {
-		return fmt.Errorf("parsing uid for %q: %w", b.RunAs, err)
-	}
-	gid, err := strconv.ParseUint(u.Gid, 10, 32)
-	if err != nil {
-		return fmt.Errorf("parsing gid for %q: %w", b.RunAs, err)
-	}
-	b.uid = uint32(uid)
-	b.gid = uint32(gid)
+	b.uid = uid
+	b.gid = uint32(gid64)
 	b.hasCredential = true
 	return nil
 }

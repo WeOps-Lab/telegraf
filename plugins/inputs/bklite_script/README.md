@@ -61,7 +61,8 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # environment = ["TOKEN=secret"]
 
   ## Linux: non-root account to run the script as. Required when Telegraf
-  ## is running as root. Root / "root" is always refused.
+  ## is running as root. Names that resolve to uid 0 (including "root")
+  ## are refused at startup. Empty run_as never silently runs as root.
   ## Windows: ignored; run the Telegraf service under the desired account.
   # run_as = "telegraf"
 ```
@@ -79,9 +80,10 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ### Platform-enforced behavior (fixed)
 
 - **Timeout** = `interval - 1s`. There is no user `timeout` knob.
-- **Linux root**: Init fails if the child would run as root. When Telegraf is
-  root, set `run_as` to a non-root account; the child is launched with
-  `setuid`/`setgid`. There is no `allow_root` flag.
+- **Linux root**: Init fails if the child would run as root: empty `run_as`
+  while Telegraf is root, `run_as = "root"`, or any account whose uid is 0.
+  There is no `allow_root` flag. When Telegraf is root, set `run_as` to a
+  non-root account; the child is launched with `setuid`/`setgid`.
 - **Linux resource limits** (always applied, no disable flag):
   - memory: 256MiB (`cgroup v2 memory.max` when writable, plus `RLIMIT_AS`)
   - CPU time: `RLIMIT_CPU` equal to the derived timeout (seconds)

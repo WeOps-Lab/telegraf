@@ -58,3 +58,10 @@ func checkRootPermission(euid int, username string) error {
 func wrapUserLookup(username string, err error) error {
 	return fmt.Errorf("looking up user %q: %w", username, err)
 }
+
+func refuseIfRootUID(uid uint32, username string) error {
+	if uid == 0 {
+		return fmt.Errorf("refusing to run as root; user %q has uid 0", username)
+	}
+	return nil
+}

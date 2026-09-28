@@ -38,6 +38,8 @@ func TestCheckRootPermission(t *testing.T) {
 	require.NoError(t, checkRootPermission(0, "nobody"))
 	require.NoError(t, checkRootPermission(1000, ""))
 	require.NoError(t, checkRootPermission(1000, "telegraf"))
+	require.ErrorContains(t, refuseIfRootUID(0, "toor"), "uid 0")
+	require.NoError(t, refuseIfRootUID(65534, "nobody"))
 }
 
 func TestDerivedTimeout(t *testing.T) {
