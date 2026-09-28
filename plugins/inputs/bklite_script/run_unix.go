@@ -17,6 +17,7 @@ import (
 
 var osGeteuid = os.Geteuid
 var lookupUser = user.Lookup
+var osChown = os.Chown
 
 func defaultInterpreter() (string, error) {
 	return "/bin/sh", nil
@@ -66,6 +67,19 @@ func (b *BkliteScript) chownScript(path string) error {
 	}
 	if err := os.Chown(path, int(b.uid), int(b.gid)); err != nil {
 		return fmt.Errorf("chown temp script: %w", err)
+	}
+	return nil
+}
+
+func (b *BkliteScript) chownRunDir() error {
+	if !b.hasCredential {
+		return nil
+	}
+	if err := osChown(b.RunDir, int(b.uid), int(b.gid)); err != nil {
+		return fmt.Errorf("chown run_dir %q: %w", b.RunDir, err)
+	}
+	if err := os.Chmod(b.RunDir, 0700); err != nil {
+		return fmt.Errorf("chmod run_dir %q: %w", b.RunDir, err)
 	}
 	return nil
 }
