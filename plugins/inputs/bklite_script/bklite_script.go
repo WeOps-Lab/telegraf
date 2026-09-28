@@ -77,14 +77,20 @@ func (b *BkliteScript) Init() error {
 	if b.RunDir == "" {
 		b.RunDir = filepath.Join(os.TempDir(), "bklite_script")
 	}
-	if err := os.MkdirAll(b.RunDir, 0700); err != nil {
-		return fmt.Errorf("creating run_dir %q: %w", b.RunDir, err)
-	}
-	b.lockPath = filepath.Join(b.RunDir, b.instanceID()+".lock")
 
+	// Resolve run_as uid/gid before creating or chowning run_dir so a
+	// root-owned 0700 directory from a previous start is given to the
+	// dropped-privilege user (CreateTemp and the child both need access).
 	if err := b.initUser(); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(b.RunDir, 0700); err != nil {
+		return fmt.Errorf("creating run_dir %q: %w", b.RunDir, err)
+	}
+	if err := b.chownRunDir(); err != nil {
+		return err
+	}
+	b.lockPath = filepath.Join(b.RunDir, b.instanceID()+".lock")
 
 	header := make(http.Header)
 	header.Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")

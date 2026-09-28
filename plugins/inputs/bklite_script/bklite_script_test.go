@@ -92,8 +92,13 @@ func TestLockPreventsOverlap(t *testing.T) {
 
 func TestRootRefuseLinux(t *testing.T) {
 	orig := osGeteuid
+	origChown := osChown
 	osGeteuid = func() int { return 0 }
-	t.Cleanup(func() { osGeteuid = orig })
+	osChown = func(string, int, int) error { return nil }
+	t.Cleanup(func() {
+		osGeteuid = orig
+		osChown = origChown
+	})
 
 	p := New()
 	p.Log = testutil.Logger{}
@@ -118,6 +123,78 @@ func TestRootRefuseLinux(t *testing.T) {
 	p2.runTimeout = time.Second
 	p2.RunAs = "nobody"
 	require.NoError(t, p2.Init())
+}
+
+func TestInitChownsExistingRunDirForRunAsUser(t *testing.T) {
+	origGeteuid := osGeteuid
+	origLookup := lookupUser
+	origChown := osChown
+	t.Cleanup(func() {
+		osGeteuid = origGeteuid
+		lookupUser = origLookup
+		osChown = origChown
+	})
+
+	osGeteuid = func() int { return 0 }
+	lookupUser = func(name string) (*user.User, error) {
+		require.Equal(t, "nobody", name)
+		return &user.User{Uid: "1234", Gid: "5678", Username: "nobody"}, nil
+	}
+
+	var chownPath string
+	var chownUID, chownGID int
+	osChown = func(name string, uid, gid int) error {
+		chownPath = name
+		chownUID = uid
+		chownGID = gid
+		return nil
+	}
+
+	// Simulate a leftover root:root 0700 run_dir from a previous start.
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0700))
+
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = dir
+	p.Script = "true"
+	p.runTimeout = time.Second
+	p.RunAs = "nobody"
+	require.NoError(t, p.Init())
+	require.True(t, p.hasCredential)
+	require.Equal(t, uint32(1234), p.uid)
+	require.Equal(t, uint32(5678), p.gid)
+	require.Equal(t, dir, chownPath)
+	require.Equal(t, 1234, chownUID)
+	require.Equal(t, 5678, chownGID)
+
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0700), info.Mode().Perm())
+}
+
+func TestInitSkipsRunDirChownWithoutCredential(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("euid 0 with empty run_as is refused at Init")
+	}
+
+	origChown := osChown
+	t.Cleanup(func() { osChown = origChown })
+
+	called := false
+	osChown = func(string, int, int) error {
+		called = true
+		return nil
+	}
+
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = t.TempDir()
+	p.Script = "true"
+	p.runTimeout = time.Second
+	require.NoError(t, p.Init())
+	require.False(t, p.hasCredential)
+	require.False(t, called)
 }
 
 func TestRootRefuseUIDZeroAliasAtInit(t *testing.T) {

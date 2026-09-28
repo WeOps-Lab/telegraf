@@ -28,6 +28,10 @@ func (b *BkliteScript) chownScript(string) error {
 	return nil
 }
 
+func (b *BkliteScript) chownRunDir() error {
+	return nil
+}
+
 func (b *BkliteScript) runCommand(argv []string, env []string) runResult {
 	if len(argv) == 0 {
 		return startErrorResult(errors.New("empty command"))
