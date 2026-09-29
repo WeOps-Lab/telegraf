@@ -94,10 +94,14 @@ func (b *BkliteScript) Init() error {
 
 	header := make(http.Header)
 	header.Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	// Metric version 1 writes each Prometheus sample under its stdout name
+	// (e.g. host_cpu_usage_percent) instead of the v2 "prometheus" family
+	// that serializes as prometheus_<stdout>. Health metrics stay on
+	// measurement bklite_script and do not depend on name_prefix.
 	b.parser = &prometheus.Parser{
 		Header:          header,
 		IgnoreTimestamp: true,
-		MetricVersion:   2,
+		MetricVersion:   1,
 		Log:             b.Log,
 	}
 	return nil
@@ -207,6 +211,7 @@ func (b *BkliteScript) parseStdout(stdout []byte) ([]telegraf.Metric, error, boo
 	if err != nil {
 		return nil, err, false
 	}
+	metrics = writeByStdoutName(metrics)
 	if len(metrics) > platformMaxSeries {
 		return metrics[:platformMaxSeries], nil, true
 	}

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"unicode"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 )
 
 func ensurePrometheusTypes(data []byte) []byte {
@@ -51,6 +54,32 @@ func ensurePrometheusTypes(data []byte) []byte {
 		}
 	}
 	return out.Bytes()
+}
+
+// writeByStdoutName promotes leftover v2 "prometheus" measurements so each
+// sample is stored under its stdout metric name (field key), not prometheus_*.
+// Metric version 1 already uses the stdout name; this is a no-op for those.
+func writeByStdoutName(metrics []telegraf.Metric) []telegraf.Metric {
+	if len(metrics) == 0 {
+		return metrics
+	}
+	out := make([]telegraf.Metric, 0, len(metrics))
+	for _, m := range metrics {
+		if m.Name() != "prometheus" {
+			out = append(out, m)
+			continue
+		}
+		tags := m.Tags()
+		t := m.Time()
+		vtype := m.Type()
+		for _, f := range m.FieldList() {
+			if f.Key == "" {
+				continue
+			}
+			out = append(out, metric.New(f.Key, tags, map[string]interface{}{"value": f.Value}, t, vtype))
+		}
+	}
+	return out
 }
 
 func prometheusMetricName(line []byte) string {
