@@ -111,7 +111,14 @@ Secrets belong in `environment`, not in a `bash -c '...'` command string.
 
 ## Metrics
 
-Health measurement `bklite_script` (Prometheus names `bklite_script_*`):
+Business samples from script stdout use the **Prometheus metric name as the
+Telegraf measurement** (e.g. stdout `host_cpu_usage_percent 42` → measurement
+`host_cpu_usage_percent`, not `prometheus` / `prometheus_host_cpu_usage_percent`).
+Untyped samples use field `value`; `# TYPE … gauge|counter` uses `gauge` or
+`counter`. This does not require `name_prefix`.
+
+Health measurement `bklite_script` (Prometheus names `bklite_script_*`) is
+emitted separately:
 
 - `up` — 1 if the script exited 0 and parsed without error, else 0
 - `duration_seconds` — wall time of this gather

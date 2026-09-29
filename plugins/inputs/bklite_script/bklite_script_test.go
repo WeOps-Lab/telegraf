@@ -40,6 +40,17 @@ func health(t *testing.T, acc *testutil.Accumulator) map[string]interface{} {
 	return nil
 }
 
+func metricTag(t *testing.T, acc *testutil.Accumulator, measurement, key string) string {
+	t.Helper()
+	for _, m := range acc.Metrics {
+		if m.Measurement == measurement {
+			return m.Tags[key]
+		}
+	}
+	t.Fatalf("missing measurement %q", measurement)
+	return ""
+}
+
 func TestTimeoutSetsExitCode(t *testing.T) {
 	p := newTestPlugin(t)
 	p.Interpreter = "/bin/sh"
@@ -248,7 +259,11 @@ func TestSuccessfulPrometheusScript(t *testing.T) {
 	require.Equal(t, int64(1), h["up"])
 	require.Equal(t, int64(0), h["exit_code"])
 	require.Equal(t, int64(0), h["parse_errors"])
-	require.True(t, acc.HasField("prometheus", "demo_metric"))
+	require.True(t, acc.HasMeasurement("bklite_script"))
+	require.True(t, acc.HasField("demo_metric", "value"))
+	require.False(t, acc.HasMeasurement("prometheus"))
+	require.False(t, acc.HasField("prometheus", "demo_metric"))
+	require.Equal(t, "ok", metricTag(t, &acc, "demo_metric", "script"))
 }
 
 func TestScriptBodyNotInArgv(t *testing.T) {
@@ -283,7 +298,8 @@ func TestScriptEnvNotPassedToChild(t *testing.T) {
 	require.Empty(t, acc.Errors)
 	h := health(t, &acc)
 	require.Equal(t, int64(1), h["up"])
-	require.True(t, acc.HasField("prometheus", "fromenv_metric"))
+	require.True(t, acc.HasField("fromenv_metric", "value"))
+	require.False(t, acc.HasMeasurement("prometheus"))
 }
 
 func TestMaxSeriesTruncated(t *testing.T) {
