@@ -34,6 +34,17 @@ func derivedTimeout(interval time.Duration) time.Duration {
 	return interval - time.Second
 }
 
+// effectiveTimeout is min(configured, interval-1s). Unset or zero configured
+// keeps the historical interval-1s default. Interval <= 1s is guarded the
+// same way as derivedTimeout.
+func effectiveTimeout(configured, interval time.Duration) time.Duration {
+	limit := derivedTimeout(interval)
+	if configured <= 0 || configured > limit {
+		return limit
+	}
+	return configured
+}
+
 func validateInterval(interval time.Duration) error {
 	if interval < minInterval {
 		return fmt.Errorf("interval must be at least %s (got %s)", minInterval, interval)

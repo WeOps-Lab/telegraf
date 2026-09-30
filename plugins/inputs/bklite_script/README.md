@@ -7,7 +7,8 @@ BlueKing Lite script-monitoring input.
 `inputs.exec` is unchanged.
 
 BKLite child configs should only set the user-facing fields below. Sandbox
-limits, timeout, and root policy are **fixed in the plugin** (not toggles).
+limits and root policy are **fixed in the plugin** (not toggles). Optional
+`timeout` is capped at interval-1s.
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
@@ -26,14 +27,19 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 # Telegraf pipeline; failures are reported via bklite_script health metrics.
 #
 # Platform-enforced (not configurable in this plugin):
-#   - timeout = interval - 1s (set interval >= 60s)
+#   - timeout is capped at interval-1s (default = cap; set interval >= 60s)
 #   - Linux: refuse to run as root; drop to run_as when Telegraf is root
 #   - Linux: CPU / memory / process limits (cgroup v2 and/or setrlimit)
 #   - per-instance file lock (no overlapping runs)
 #   - script body is never placed in process argv
 [[inputs.bklite_script]]
-  ## Collection interval. Must be at least 60s. Child timeout is interval-1s.
+  ## Collection interval. Must be at least 60s.
   interval = "60s"
+
+  ## Optional script timeout. Unset or "0s" keeps interval-1s (same as
+  ## previous behavior). Effective timeout is min(timeout, interval-1s);
+  ## values above the cap are clamped and logged once at startup.
+  # timeout = "30s"
 
   ## Optional name used as the "script" tag on health and parsed metrics.
   # script_name = ""
@@ -75,6 +81,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 | Field | Notes |
 |-------|--------|
 | `interval` | Required, **≥ 60s**. Telegraf collection interval for this input. |
+| `timeout` | Optional. Unset or `0` uses `interval - 1s`. Effective value is `min(timeout, interval - 1s)`. |
 | `script` / `script_env` | Script body. Written to a private file; **not** in argv. |
 | `interpreter` / `params` | How the file is executed. |
 | `environment` | Secrets (`KEY=value`) for the child. |
@@ -82,14 +89,16 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ### Platform-enforced behavior (fixed)
 
-- **Timeout** = `interval - 1s`. There is no user `timeout` knob.
+- **Timeout cap** = `interval - 1s`. Configured `timeout` cannot exceed this.
+  Unset or `0` keeps that default (same as previous behavior). Exceeding the
+  cap is clamped and logged once at Init.
 - **Linux root**: Init fails if the child would run as root: empty `run_as`
   while Telegraf is root, `run_as = "root"`, or any account whose uid is 0.
   There is no `allow_root` flag. When Telegraf is root, set `run_as` to a
   non-root account; the child is launched with `setuid`/`setgid`.
 - **Linux resource limits** (always applied, no disable flag):
   - memory: 256MiB (`cgroup v2 memory.max` when writable, plus `RLIMIT_AS`)
-  - CPU time: `RLIMIT_CPU` equal to the derived timeout (seconds)
+  - CPU time: `RLIMIT_CPU` equal to the effective timeout (seconds)
   - processes: 64 via `cgroup v2 pids.max` when writable; if cgroup setup
     fails, `RLIMIT_NPROC=256` (per-UID ceiling) is applied so a fork bomb
     cannot unbounded-spawn. Windows has no CPU/memory/nproc quotas.

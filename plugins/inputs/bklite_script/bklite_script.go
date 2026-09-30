@@ -26,6 +26,7 @@ var sampleConfig string
 // BkliteScript runs a user script and collects Prometheus metrics from stdout.
 type BkliteScript struct {
 	Interval    config.Duration `toml:"interval"`
+	Timeout     config.Duration `toml:"timeout"`
 	ScriptName  string          `toml:"script_name"`
 	Interpreter string          `toml:"interpreter"`
 	Params      []string        `toml:"params"`
@@ -36,8 +37,9 @@ type BkliteScript struct {
 	RunAs       string          `toml:"run_as"`
 	Log         telegraf.Logger `toml:"-"`
 
-	// runTimeout is interval-1s after Init. Tests may set it before Init to
-	// avoid waiting a full minute.
+	// runTimeout is the effective child timeout after Init:
+	// min(configured timeout, interval-1s). Unset or zero timeout keeps
+	// interval-1s. Tests may set it before Init to avoid waiting a full minute.
 	runTimeout    time.Duration
 	lockPath      string
 	hasCredential bool
@@ -59,7 +61,7 @@ func (b *BkliteScript) Init() error {
 		if err := validateInterval(time.Duration(b.Interval)); err != nil {
 			return err
 		}
-		b.runTimeout = derivedTimeout(time.Duration(b.Interval))
+		b.applyTimeout(time.Duration(b.Interval))
 	}
 
 	if !b.usesScriptBody() {
@@ -247,11 +249,27 @@ func (b *BkliteScript) emitHealth(acc telegraf.Accumulator, h healthResult) {
 	}, map[string]string{"script": b.scriptTag()})
 }
 
+func (b *BkliteScript) applyTimeout(interval time.Duration) {
+	configured := time.Duration(b.Timeout)
+	limit := derivedTimeout(interval)
+	b.runTimeout = effectiveTimeout(configured, interval)
+	if configured > limit {
+		b.logWarnf("timeout %s exceeds cap %s (interval-1s); using %s", configured, limit, limit)
+	}
+}
+
 func (b *BkliteScript) logErrorf(format string, args ...interface{}) {
 	if b.Log == nil {
 		return
 	}
 	b.Log.Errorf(format, args...)
+}
+
+func (b *BkliteScript) logWarnf(format string, args ...interface{}) {
+	if b.Log == nil {
+		return
+	}
+	b.Log.Warnf(format, args...)
 }
 
 type healthResult struct {
