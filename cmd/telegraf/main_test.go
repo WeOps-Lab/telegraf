@@ -435,29 +435,20 @@ func TestCommandVersion(t *testing.T) {
 		ExpectedOutput string
 	}{
 		{
-			Version:        "v2.0.0",
-			ExpectedOutput: "Telegraf v2.0.0\n",
+			Version:        "0.5.0",
+			Branch:         "bklite",
+			Commit:         "abcdef",
+			ExpectedOutput: "0.5.0\n",
 		},
 		{
-			ExpectedOutput: "Telegraf unknown\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Branch:         "master",
-			ExpectedOutput: "Telegraf v2.0.0 (git: master@unknown)\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Branch:         "master",
-			Commit:         "123",
-			ExpectedOutput: "Telegraf v2.0.0 (git: master@123)\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Commit:         "123",
-			ExpectedOutput: "Telegraf v2.0.0 (git: unknown@123)\n",
+			ExpectedOutput: "unknown\n",
 		},
 	}
+
+	origVersion, origBranch, origCommit := internal.Version, internal.Branch, internal.Commit
+	t.Cleanup(func() {
+		internal.Version, internal.Branch, internal.Commit = origVersion, origBranch, origCommit
+	})
 
 	for _, test := range tests {
 		buf := new(bytes.Buffer)
@@ -481,29 +472,20 @@ func TestFlagVersion(t *testing.T) {
 		ExpectedOutput string
 	}{
 		{
-			Version:        "v2.0.0",
-			ExpectedOutput: "Telegraf v2.0.0\n",
+			Version:        "0.5.0",
+			Branch:         "bklite",
+			Commit:         "abcdef",
+			ExpectedOutput: "0.5.0\n",
 		},
 		{
-			ExpectedOutput: "Telegraf unknown\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Branch:         "master",
-			ExpectedOutput: "Telegraf v2.0.0 (git: master@unknown)\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Branch:         "master",
-			Commit:         "123",
-			ExpectedOutput: "Telegraf v2.0.0 (git: master@123)\n",
-		},
-		{
-			Version:        "v2.0.0",
-			Commit:         "123",
-			ExpectedOutput: "Telegraf v2.0.0 (git: unknown@123)\n",
+			ExpectedOutput: "unknown\n",
 		},
 	}
+
+	origVersion, origBranch, origCommit := internal.Version, internal.Branch, internal.Commit
+	t.Cleanup(func() {
+		internal.Version, internal.Branch, internal.Commit = origVersion, origBranch, origCommit
+	})
 
 	for _, test := range tests {
 		buf := new(bytes.Buffer)
@@ -516,6 +498,19 @@ func TestFlagVersion(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, test.ExpectedOutput, buf.String())
 	}
+}
+
+func TestFlagUpstreamVersion(t *testing.T) {
+	orig := internal.Upstream
+	t.Cleanup(func() { internal.Upstream = orig })
+	internal.Upstream = "1.32.1"
+	internal.Version = "0.5.0"
+
+	buf := new(bytes.Buffer)
+	args := append(os.Args[0:1], "--upstream-version")
+	err := runApp(args, buf, NewMockServer(), NewMockConfig(buf), NewMockTelegraf())
+	require.NoError(t, err)
+	require.Equal(t, "1.32.1\n", buf.String())
 }
 
 func TestGlobablBoolFlags(t *testing.T) {

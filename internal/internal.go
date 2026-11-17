@@ -35,9 +35,10 @@ var (
 
 // Set via LDFLAGS -X
 var (
-	Version = "unknown"
-	Branch  = ""
-	Commit  = ""
+	Version  = "unknown"
+	Upstream = "1.32.1"
+	Branch   = ""
+	Commit   = ""
 )
 
 type ReadWaitCloser struct {
@@ -45,27 +46,23 @@ type ReadWaitCloser struct {
 	wg         sync.WaitGroup
 }
 
+// FormatFullVersion is the BKLite release version printed by --version.
+// Packaging stores this stdout as the node-management version, so it is only
+// the x.y.z release number.
 func FormatFullVersion() string {
-	var parts = []string{"Telegraf"}
-
-	if Version != "" {
-		parts = append(parts, Version)
-	} else {
-		parts = append(parts, "unknown")
+	if Version == "" {
+		return "unknown"
 	}
+	return Version
+}
 
-	if Branch != "" || Commit != "" {
-		if Branch == "" {
-			Branch = "unknown"
-		}
-		if Commit == "" {
-			Commit = "unknown"
-		}
-		git := fmt.Sprintf("(git: %s@%s)", Branch, Commit)
-		parts = append(parts, git)
+// FormatUpstreamVersion is the upstream Telegraf version compiled into the
+// binary. It is not part of --version.
+func FormatUpstreamVersion() string {
+	if Upstream == "" {
+		return "unknown"
 	}
-
-	return strings.Join(parts, " ")
+	return Upstream
 }
 
 // ProductToken returns a tag for Telegraf that can be used in user agents.
