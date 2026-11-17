@@ -8,6 +8,7 @@ tag := $(shell git describe --exact-match --tags 2>/dev/null)
 
 branch := $(shell git rev-parse --abbrev-ref HEAD)
 commit := $(shell git rev-parse --short=8 HEAD)
+upstream_version ?= 1.32.1
 
 ifdef NIGHTLY
 	version := $(next_version)
@@ -32,6 +33,13 @@ else ifneq ($(findstring -rc,$(tag)),)
 	deb_version := $(version)~$(rc)-1
 	deb_iteration := 0
 	tar_version := $(version)~$(rc)
+else ifneq ($(filter bklite-%,$(tag)),)
+	version := $(patsubst bklite-%,%,$(tag))
+	rpm_version := $(version)-1
+	rpm_iteration := 1
+	deb_version := $(version)-1
+	deb_iteration := 1
+	tar_version := $(version)
 else
 	version := $(tag:v%=%)
 	rpm_version := $(version)-1
@@ -46,7 +54,7 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 HOSTGO := env -u GOOS -u GOARCH -u GOARM -- go
 INTERNAL_PKG=github.com/influxdata/telegraf/internal
-LDFLAGS := $(LDFLAGS) -X $(INTERNAL_PKG).Commit=$(commit) -X $(INTERNAL_PKG).Branch=$(branch)
+LDFLAGS := $(LDFLAGS) -X $(INTERNAL_PKG).Commit=$(commit) -X $(INTERNAL_PKG).Branch=$(branch) -X $(INTERNAL_PKG).Upstream=$(upstream_version)
 ifneq ($(tag),)
 	LDFLAGS += -X $(INTERNAL_PKG).Version=$(version)
 else

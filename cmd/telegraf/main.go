@@ -205,6 +205,9 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 				return fmt.Errorf("%w and %w", err, err2)
 			}
 			return nil
+		case cCtx.Bool("upstream-version"):
+			fmt.Fprintf(outputBuffer, "%s\n", internal.FormatUpstreamVersion())
+			return nil
 		// DEPRECATED
 		case cCtx.Bool("version"):
 			fmt.Fprintf(outputBuffer, "%s\n", internal.FormatFullVersion())
@@ -355,6 +358,10 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 				&cli.BoolFlag{
 					Name:  "version",
 					Usage: "DEPRECATED: display the version and exit",
+				},
+				&cli.BoolFlag{
+					Name:  "upstream-version",
+					Usage: "print the upstream Telegraf version compiled into this binary and exit",
 				},
 				// Already covered with the subcommand `./telegraf config`
 				&cli.BoolFlag{
