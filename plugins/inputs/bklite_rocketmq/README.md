@@ -37,7 +37,7 @@ RocketMQ **5.x** (current release 5.5.1) is a separate line. Since 5.1 it expose
 
 | Measurement | Fields | Tags |
 |---|---|---|
-| `bklite_rocketmq_up` | `up` | `namesrv` |
+| `bklite_rocketmq` | `up` | `namesrv` |
 | `bklite_rocketmq_broker` | `tps`, `qps`, `commitlog_disk_ratio` | `cluster`, `broker`, `broker_ip` |
 | `bklite_rocketmq_producer` | `tps`, `message_size`, `offset` | `cluster`, `broker`, `topic` |
 | `bklite_rocketmq_consumer` | `tps`, `message_size`, `offset` | `cluster`, `broker`, `group`, `topic` |

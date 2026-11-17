@@ -82,7 +82,7 @@ func (r *RocketMQ) Gather(acc telegraf.Accumulator) error {
 		}
 		acc.AddError(err)
 		if snap.Namesrv == "" {
-			acc.AddGauge("bklite_rocketmq_up", map[string]interface{}{"up": int64(0)}, map[string]string{
+			acc.AddGauge("bklite_rocketmq", map[string]interface{}{"up": int64(0)}, map[string]string{
 				"namesrv": r.namesrvTag(),
 			})
 			return nil

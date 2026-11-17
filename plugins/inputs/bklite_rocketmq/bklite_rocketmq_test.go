@@ -42,7 +42,7 @@ func TestGatherEmitsOperationalMetricsAndSkipsMissingFields(t *testing.T) {
 	require.NoError(t, plugin.Gather(acc))
 	require.Empty(t, acc.Errors)
 
-	acc.AssertContainsTaggedFields(t, "bklite_rocketmq_up", map[string]interface{}{"up": int64(1)}, map[string]string{"namesrv": "10.0.0.1:9876"})
+	acc.AssertContainsTaggedFields(t, "bklite_rocketmq", map[string]interface{}{"up": int64(1)}, map[string]string{"namesrv": "10.0.0.1:9876"})
 	acc.AssertContainsTaggedFields(t, "bklite_rocketmq_broker", map[string]interface{}{
 		"tps": float64(12), "qps": float64(30), "commitlog_disk_ratio": float64(0.4),
 	}, map[string]string{"cluster": "c1", "broker": "broker-a", "broker_ip": "10.0.0.2"})
@@ -98,7 +98,7 @@ func TestGatherFailureKeepsTelegrafUp(t *testing.T) {
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 	require.Len(t, acc.Errors, 1)
-	acc.AssertContainsTaggedFields(t, "bklite_rocketmq_up", map[string]interface{}{"up": int64(0)}, map[string]string{"namesrv": "10.0.0.1:9876"})
+	acc.AssertContainsTaggedFields(t, "bklite_rocketmq", map[string]interface{}{"up": int64(0)}, map[string]string{"namesrv": "10.0.0.1:9876"})
 }
 
 func TestParseRuntimeAndTopicOffset(t *testing.T) {

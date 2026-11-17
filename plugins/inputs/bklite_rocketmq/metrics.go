@@ -58,7 +58,7 @@ func (r *RocketMQ) emit(acc telegraf.Accumulator, snap snapshot) {
 	if namesrv == "" {
 		namesrv = r.namesrvTag()
 	}
-	acc.AddGauge("bklite_rocketmq_up", map[string]interface{}{"up": int64(1)}, map[string]string{"namesrv": namesrv})
+	acc.AddGauge("bklite_rocketmq", map[string]interface{}{"up": int64(1)}, map[string]string{"namesrv": namesrv})
 
 	for _, broker := range snap.Brokers {
 		fields := map[string]interface{}{}
