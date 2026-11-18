@@ -14,9 +14,7 @@ func (b *BkliteScript) prepareArgv() ([]string, func(), error) {
 	if err != nil {
 		return nil, cleanup, err
 	}
-	argv := append([]string{b.Interpreter}, b.Params...)
-	argv = append(argv, path)
-	return argv, cleanup, nil
+	return prepareInterpreterArgs(b.Interpreter, b.Params, path), cleanup, nil
 }
 
 func (b *BkliteScript) materializeScript() (string, func(), error) {
@@ -33,7 +31,11 @@ func (b *BkliteScript) materializeScript() (string, func(), error) {
 		return "", nil, errors.New("script body is empty")
 	}
 
-	f, err := os.CreateTemp(b.RunDir, "script-*")
+	pattern := "script-*"
+	if suffix := scriptFileSuffix(b.Interpreter); suffix != "" {
+		pattern = "script-*" + suffix
+	}
+	f, err := os.CreateTemp(b.RunDir, pattern)
 	if err != nil {
 		return "", nil, fmt.Errorf("creating temp script: %w", err)
 	}

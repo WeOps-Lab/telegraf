@@ -45,14 +45,23 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # script_name = ""
 
   ## Interpreter used to execute the materialized script file (argv[0]).
-  ## The script body is written to a private temp file; argv contains only
-  ## the interpreter, params, and that path. Default on Unix: "/bin/sh".
-  ## On Windows this is required when using script / script_env.
+  ## The script body is written to a private temp file. Default on Unix:
+  ## "/bin/sh". On Windows this is required when using script / script_env.
+  ## Windows: temp file suffix follows the interpreter (powershell/pwsh →
+  ## .ps1, cmd → .cmd, python → .py). powershell/pwsh get
+  ## -NoProfile -ExecutionPolicy Bypass -File; cmd gets /C. Flags already
+  ## present in params are not repeated.
   # interpreter = "/bin/sh"
 
-  ## Extra arguments between the interpreter and the script path.
-  ##   example: params = ["-u"]
+  ## Extra interpreter arguments (before the script path, or before -File
+  ## /C on Windows). Example: params = ["-u"]
   # params = []
+
+  ## Directory for the private temp script and lock file. Default is
+  ## $TMPDIR/bklite_script. On Windows, a path under \Windows\SystemTemp
+  ## or \Windows\Temp is replaced with %ProgramData%\bklite_script
+  ## (fallback: the user cache dir).
+  # run_dir = ""
 
   ## Inline script body (preferred). Never appears in `ps` argv.
   script = """
@@ -113,8 +122,19 @@ account.
 ### How the script is launched
 
 ```text
-<interpreter> [params...] <private_script_path>
+Unix:
+  <interpreter> [params...] <private_script_path>
+
+Windows PowerShell:
+  powershell.exe -NoProfile -ExecutionPolicy Bypass [params...] -File <path>.ps1
+
+Windows cmd:
+  cmd.exe [params...] /C <path>.cmd
 ```
+
+On Windows the temp file also gets a matching suffix (`.ps1` / `.cmd` / `.py`).
+The default `run_dir` is not placed under `Windows\SystemTemp` or
+`Windows\Temp`; `%ProgramData%\bklite_script` is used instead.
 
 Secrets belong in `environment`, not in a `bash -c '...'` command string.
 

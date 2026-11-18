@@ -76,9 +76,13 @@ func (b *BkliteScript) Init() error {
 		b.Interpreter = interp
 	}
 
-	if b.RunDir == "" {
-		b.RunDir = filepath.Join(os.TempDir(), "bklite_script")
+	resolved := resolveRunDir(b.RunDir)
+	if b.Log != nil && b.RunDir != "" && resolved != b.RunDir {
+		b.Log.Infof("run_dir %q is a restricted Windows system temp; using %q instead", b.RunDir, resolved)
+	} else if b.Log != nil && b.RunDir == "" && resolved != joinRunDir(os.TempDir()) {
+		b.Log.Infof("default run_dir would be a restricted Windows system temp; using %q instead", resolved)
 	}
+	b.RunDir = resolved
 
 	// Resolve run_as uid/gid before creating or chowning run_dir so a
 	// root-owned 0700 directory from a previous start is given to the

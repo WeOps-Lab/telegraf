@@ -51,7 +51,10 @@ func (b *BkliteScript) runCommand(argv []string, env []string) runResult {
 	if err := cmd.Start(); err != nil {
 		return startErrorResult(err)
 	}
-	return waitAndCollect(cmd, b.runTimeout, &stdout, &stderr)
+	res := waitAndCollect(cmd, b.runTimeout, &stdout, &stderr)
+	res.stdout = removeWindowsCarriageReturns(res.stdout)
+	res.stderr = string(removeWindowsCarriageReturns([]byte(res.stderr)))
+	return res
 }
 
 func (b *BkliteScript) withLock(fn func()) (bool, error) {
