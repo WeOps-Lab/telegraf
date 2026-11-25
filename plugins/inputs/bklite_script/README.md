@@ -115,6 +115,10 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   - processes: 64 via `cgroup v2 pids.max` when writable; if cgroup setup
     fails, `RLIMIT_NPROC=256` (per-UID ceiling) is applied so a fork bomb
     cannot unbounded-spawn. Windows has no CPU/memory/nproc quotas.
+  - Linux applies the promised rlimits in the child with `/usr/bin/prlimit`
+    (util-linux, fixed path) before exec. If that binary is missing, the
+    gather fails with exit 127, the script is not started, and the agent
+    continues.
 - **Lock**: exclusive per-instance file lock; overlapping gathers are skipped
   (`exit_code = 125`).
 - **Output caps**: 50 Prometheus series and 64KiB stdout.

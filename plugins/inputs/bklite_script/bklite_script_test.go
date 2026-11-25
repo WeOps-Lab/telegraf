@@ -161,7 +161,7 @@ func metricTag(t *testing.T, acc *testutil.Accumulator, measurement, key string)
 func TestTimeoutSetsExitCode(t *testing.T) {
 	p := newTestPlugin(t)
 	p.Interpreter = "/bin/sh"
-	p.Script = "sleep 5"
+	p.Script = "while :; do :; done"
 	p.runTimeout = 200 * time.Millisecond
 	require.NoError(t, p.Init())
 
@@ -177,9 +177,12 @@ func TestTimeoutSetsExitCode(t *testing.T) {
 func TestLockPreventsOverlap(t *testing.T) {
 	p := newTestPlugin(t)
 	p.ScriptName = "locktest"
-	marker := filepath.Join(dirReachableByDroppedUser(t), "started")
+	dir := dirReachableByDroppedUser(t)
+	marker := filepath.Join(dir, "started")
+	stop := filepath.Join(dir, "stop")
 	p.Interpreter = "/bin/sh"
-	p.Script = "echo started > " + marker + "\nsleep 5\n"
+	// Stop-file wait stays in the shell without forking sleep(1).
+	p.Script = "echo started > " + marker + "\nwhile [ ! -f " + stop + " ]; do :; done\n"
 	p.runTimeout = 8 * time.Second
 	require.NoError(t, p.Init())
 
@@ -197,6 +200,7 @@ func TestLockPreventsOverlap(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 
 	require.NoError(t, p.Gather(&acc2))
+	require.NoError(t, os.WriteFile(stop, []byte("1"), 0o644))
 	wg.Wait()
 
 	h2 := health(t, &acc2)
@@ -401,6 +405,9 @@ func TestSuccessfulPrometheusScript(t *testing.T) {
 }
 
 func TestScriptBodyNotInArgv(t *testing.T) {
+	if n, ok := currentUIDThreadCount(); ok && n >= rlimitNprocFallback {
+		t.Skipf("uid has %d threads; historical NPROC fallback is 256 and this host cannot fork tr(1); run in a lean default-cap container", n)
+	}
 	dir := dirReachableByDroppedUser(t)
 	out := filepath.Join(dir, "cmdline")
 	p := newTestPlugin(t)
