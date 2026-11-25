@@ -39,12 +39,12 @@ func TestPrometheusMetricName(t *testing.T) {
 }
 
 func TestCheckRootPermission(t *testing.T) {
-	require.Error(t, checkRootPermission(0, ""))
-	require.Error(t, checkRootPermission(0, "root"))
-	require.Error(t, checkRootPermission(1000, "root"))
-	require.NoError(t, checkRootPermission(0, "nobody"))
-	require.NoError(t, checkRootPermission(1000, ""))
-	require.NoError(t, checkRootPermission(1000, "telegraf"))
+	require.NoError(t, checkRootPermission(""))
+	require.NoError(t, checkRootPermission("  "))
+	require.Error(t, checkRootPermission("root"))
+	require.Error(t, checkRootPermission(" root "))
+	require.NoError(t, checkRootPermission("nobody"))
+	require.NoError(t, checkRootPermission("telegraf"))
 	require.ErrorContains(t, refuseIfRootUID(0, "toor"), "uid 0")
 	require.NoError(t, refuseIfRootUID(65534, "nobody"))
 }

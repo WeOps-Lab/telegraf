@@ -24,11 +24,13 @@ func defaultInterpreter() (string, error) {
 }
 
 func (b *BkliteScript) initUser() error {
-	if err := checkRootPermission(osGeteuid(), b.RunAs); err != nil {
+	b.RunAs = normalizedRunAs(b.RunAs)
+	if err := checkRootPermission(b.RunAs); err != nil {
 		return err
 	}
 	if b.RunAs == "" {
-		// Already refused if euid is 0; run as the current non-root user.
+		// Inherit the Telegraf process user, including root. Privilege
+		// drop happens only when a non-root run_as is explicitly set.
 		return nil
 	}
 
@@ -88,8 +90,13 @@ func (b *BkliteScript) runCommand(argv []string, env []string) runResult {
 	if len(argv) == 0 {
 		return startErrorResult(errors.New("empty command"))
 	}
+	// Apply promised rlimits in the child (prlimit-then-exec) before the
+	// user interpreter starts. Credential still drops first when set; the
+	// wrapper then lowers its own limits. A missing wrapper binary makes
+	// Start fail with exit 127 for this gather only.
+	argv = wrapLinuxChildLimits(argv, b.runTimeout, b.hasCredential)
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = env
+	cmd.Env = sanitizeLinuxLimitEnv(env)
 	sys := &syscall.SysProcAttr{Setpgid: true}
 	if b.hasCredential {
 		sys.Credential = &syscall.Credential{Uid: b.uid, Gid: b.gid}

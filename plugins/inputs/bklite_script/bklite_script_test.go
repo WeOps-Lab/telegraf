@@ -17,14 +17,121 @@ import (
 	"github.com/influxdata/telegraf/testutil"
 )
 
+// runDirReachableByDroppedUser returns a RunDir whose ancestors are
+// traversable by a non-root child. Do not use t.TempDir for this: Go
+// 1.23 nests /tmp/TestNameXXX/001, both created 0700. Chmod of the 001
+// leaf (tests-v2) leaves TestNameXXX at 0700, so a dropped user still
+// cannot traverse (ops 17:57, tests-v2-1743, e.g.
+// /tmp/TestRootDropsToExplicitNonRootUser…/001/run/script-…).
+// Production run_dir is /tmp/bklite_script-*, a child of world-writable
+// /tmp, so this is a fixture constraint, not a plugin chown or
+// materialize defect. Do not chmod the shared temp root, do not chmod
+// production ancestors, and do not loosen run_dir 0700 / script 0600
+// to make the fixture pass.
+func runDirReachableByDroppedUser(t *testing.T) string {
+	t.Helper()
+	tempRoot := traversableTempRoot(t)
+	// Directory is created directly under the system temp root, then
+	// chmod 0755. Only this test-owned directory is changed; cleanup
+	// removes it. The plugin Init still MkdirAll/chown the "run" leaf.
+	parent, err := os.MkdirTemp(tempRoot, "bklite-script-testrun-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(parent) })
+	require.NoError(t, os.Chmod(parent, 0o755))
+	requireDroppedUserCanTraverse(t, parent)
+	return filepath.Join(parent, "run")
+}
+
+// dirReachableByDroppedUser returns a test-owned directory directly under
+// a world-traversable temp root, mode 0777, so a dropped child can create
+// files in it. chmod of a t.TempDir leaf is not enough: Go 1.23 leaves
+// the TestName ancestor at 0700. Never chmod the shared temp root.
+func dirReachableByDroppedUser(t *testing.T) string {
+	t.Helper()
+	tempRoot := traversableTempRoot(t)
+	dir, err := os.MkdirTemp(tempRoot, "bklite-script-testio-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	require.NoError(t, os.Chmod(dir, 0o777))
+	requireDroppedUserCanTraverse(t, dir)
+	return dir
+}
+
+func traversableTempRoot(t *testing.T) string {
+	t.Helper()
+	candidates := []string{os.TempDir()}
+	if os.TempDir() != "/tmp" {
+		candidates = append(candidates, "/tmp")
+	}
+	for _, root := range candidates {
+		if otherExecutable(t, root) {
+			return root
+		}
+	}
+	t.Fatalf("no world-traversable temp root among %v; refuse to chmod a shared temp directory; set TMPDIR to a world-traversable dir such as /tmp", candidates)
+	return ""
+}
+
+func otherExecutable(t *testing.T, path string) bool {
+	t.Helper()
+	st, err := os.Stat(path)
+	require.NoError(t, err)
+	return st.Mode()&0o001 != 0
+}
+
+// requireDroppedUserCanTraverse fails the fixture immediately if any
+// ancestor between dir and a world-traversable directory is still not
+// other-executable. It never chmods those ancestors.
+func requireDroppedUserCanTraverse(t *testing.T, dir string) {
+	t.Helper()
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no world-traversable ancestor above %s", dir)
+		}
+		if otherExecutable(t, parent) {
+			return
+		}
+		t.Fatalf("ancestor %s of fixture %s is not other-executable (mode %s); a dropped user cannot traverse; do not chmod this path from the test", parent, dir, mustMode(t, parent))
+	}
+}
+
+func mustMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(path)
+	require.NoError(t, err)
+	return st.Mode()
+}
+
+func TestRunDirFixtureAncestorsAreWorldTraversable(t *testing.T) {
+	runDir := runDirReachableByDroppedUser(t)
+	parent := filepath.Dir(runDir)
+	st, err := os.Stat(parent)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o755), st.Mode()&os.ModePerm)
+	grand := filepath.Clean(filepath.Dir(parent))
+	require.True(t, grand == filepath.Clean(os.TempDir()) || grand == "/tmp", "fixture parent %s is not directly under a temp root (grand=%s)", parent, grand)
+	requireDroppedUserCanTraverse(t, parent)
+	// Contrast with t.TempDir: the nested TestName/001 layout is what
+	// tests-v2 left non-traversable at the TestName ancestor. This
+	// assertion documents why this helper must not be switched back.
+	nested := t.TempDir()
+	if !otherExecutable(t, filepath.Dir(nested)) {
+		t.Logf("confirmed t.TempDir ancestor %s is not other-executable (mode %s); using it as RunDir parent would reproduce tests-v2-1743", filepath.Dir(nested), mustMode(t, filepath.Dir(nested)))
+	}
+}
+
 func newTestPlugin(t *testing.T) *BkliteScript {
 	t.Helper()
 	p := New()
 	p.Log = testutil.Logger{Name: "bklite_script"}
-	p.RunDir = t.TempDir()
 	p.runTimeout = 5 * time.Second
 	if os.Geteuid() == 0 {
+		// Exercise the explicit non-root drop path when the suite runs as root.
 		p.RunAs = "nobody"
+		p.RunDir = runDirReachableByDroppedUser(t)
+	} else {
+		p.RunDir = t.TempDir()
 	}
 	return p
 }
@@ -54,7 +161,7 @@ func metricTag(t *testing.T, acc *testutil.Accumulator, measurement, key string)
 func TestTimeoutSetsExitCode(t *testing.T) {
 	p := newTestPlugin(t)
 	p.Interpreter = "/bin/sh"
-	p.Script = "sleep 5"
+	p.Script = "while :; do :; done"
 	p.runTimeout = 200 * time.Millisecond
 	require.NoError(t, p.Init())
 
@@ -70,10 +177,12 @@ func TestTimeoutSetsExitCode(t *testing.T) {
 func TestLockPreventsOverlap(t *testing.T) {
 	p := newTestPlugin(t)
 	p.ScriptName = "locktest"
-	marker := filepath.Join(t.TempDir(), "started")
-	require.NoError(t, os.Chmod(filepath.Dir(marker), 0777))
+	dir := dirReachableByDroppedUser(t)
+	marker := filepath.Join(dir, "started")
+	stop := filepath.Join(dir, "stop")
 	p.Interpreter = "/bin/sh"
-	p.Script = "echo started > " + marker + "\nsleep 5\n"
+	// Stop-file wait stays in the shell without forking sleep(1).
+	p.Script = "echo started > " + marker + "\nwhile [ ! -f " + stop + " ]; do :; done\n"
 	p.runTimeout = 8 * time.Second
 	require.NoError(t, p.Init())
 
@@ -91,6 +200,7 @@ func TestLockPreventsOverlap(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 
 	require.NoError(t, p.Gather(&acc2))
+	require.NoError(t, os.WriteFile(stop, []byte("1"), 0o644))
 	wg.Wait()
 
 	h2 := health(t, &acc2)
@@ -101,7 +211,7 @@ func TestLockPreventsOverlap(t *testing.T) {
 	require.Equal(t, int64(0), h1["exit_code"])
 }
 
-func TestRootRefuseLinux(t *testing.T) {
+func TestLinuxRunAsPolicyAtInit(t *testing.T) {
 	orig := osGeteuid
 	origChown := osChown
 	osGeteuid = func() int { return 0 }
@@ -111,13 +221,18 @@ func TestRootRefuseLinux(t *testing.T) {
 		osChown = origChown
 	})
 
-	p := New()
-	p.Log = testutil.Logger{}
-	p.RunDir = t.TempDir()
-	p.Script = "true"
-	p.runTimeout = time.Second
-	p.RunAs = ""
-	require.ErrorContains(t, p.Init(), "refusing to run as root")
+	// Empty or blank run_as inherits the process user, including root.
+	for _, raw := range []string{"", "  ", "\t"} {
+		p := New()
+		p.Log = testutil.Logger{}
+		p.RunDir = t.TempDir()
+		p.Script = "true"
+		p.runTimeout = time.Second
+		p.RunAs = raw
+		require.NoError(t, p.Init(), "run_as %q", raw)
+		require.False(t, p.hasCredential, "run_as %q", raw)
+		require.Equal(t, "", p.RunAs, "run_as %q should normalize to empty", raw)
+	}
 
 	pRoot := New()
 	pRoot.Log = testutil.Logger{}
@@ -126,6 +241,7 @@ func TestRootRefuseLinux(t *testing.T) {
 	pRoot.runTimeout = time.Second
 	pRoot.RunAs = "root"
 	require.ErrorContains(t, pRoot.Init(), "refusing to run as root")
+	require.False(t, pRoot.hasCredential)
 
 	p2 := New()
 	p2.Log = testutil.Logger{}
@@ -134,6 +250,7 @@ func TestRootRefuseLinux(t *testing.T) {
 	p2.runTimeout = time.Second
 	p2.RunAs = "nobody"
 	require.NoError(t, p2.Init())
+	require.True(t, p2.hasCredential)
 }
 
 func TestInitChownsExistingRunDirForRunAsUser(t *testing.T) {
@@ -185,10 +302,6 @@ func TestInitChownsExistingRunDirForRunAsUser(t *testing.T) {
 }
 
 func TestInitSkipsRunDirChownWithoutCredential(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("euid 0 with empty run_as is refused at Init")
-	}
-
 	origChown := osChown
 	t.Cleanup(func() { osChown = origChown })
 
@@ -224,6 +337,31 @@ func TestRootRefuseUIDZeroAliasAtInit(t *testing.T) {
 	err := p.Init()
 	require.Error(t, err)
 	require.ErrorContains(t, err, "uid 0")
+	require.False(t, p.hasCredential)
+}
+
+func TestInitLookupFailureDoesNotSetCredentials(t *testing.T) {
+	origGeteuid := osGeteuid
+	origLookup := lookupUser
+	osGeteuid = func() int { return 0 }
+	lookupUser = func(name string) (*user.User, error) {
+		require.Equal(t, "missing-run-as-user", name)
+		return nil, user.UnknownUserError(name)
+	}
+	t.Cleanup(func() {
+		osGeteuid = origGeteuid
+		lookupUser = origLookup
+	})
+
+	p := New()
+	p.Log = testutil.Logger{}
+	p.RunDir = t.TempDir()
+	p.Script = "true"
+	p.runTimeout = time.Second
+	p.RunAs = "missing-run-as-user"
+	err := p.Init()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "looking up user")
 	require.False(t, p.hasCredential)
 }
 
@@ -267,8 +405,10 @@ func TestSuccessfulPrometheusScript(t *testing.T) {
 }
 
 func TestScriptBodyNotInArgv(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.Chmod(dir, 0777))
+	if n, ok := currentUIDThreadCount(); ok && n >= rlimitNprocFallback {
+		t.Skipf("uid has %d threads; historical NPROC fallback is 256 and this host cannot fork tr(1); run in a lean default-cap container", n)
+	}
+	dir := dirReachableByDroppedUser(t)
 	out := filepath.Join(dir, "cmdline")
 	p := newTestPlugin(t)
 	p.Interpreter = "/bin/sh"
