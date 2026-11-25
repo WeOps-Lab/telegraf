@@ -3,6 +3,7 @@ package bklite_script
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -60,13 +61,17 @@ func cpuLimitSeconds(timeout time.Duration) int {
 	return sec
 }
 
-// checkRootPermission refuses to run a child as root. euid is Telegraf's
-// effective uid; username is the configured run_as target.
-func checkRootPermission(euid int, username string) error {
-	if username == "root" {
-		return errors.New("refusing to run as root; set run_as to a non-root account")
-	}
-	if euid == 0 && username == "" {
+// normalizedRunAs trims user-facing run_as so blank values inherit the
+// collector process user. Explicit "root" is detected after trim.
+func normalizedRunAs(username string) string {
+	return strings.TrimSpace(username)
+}
+
+// checkRootPermission refuses an explicit root target. Empty or blank
+// run_as is allowed and means inherit the Telegraf process user, including
+// when that user is root. uid 0 aliases are refused separately after lookup.
+func checkRootPermission(username string) error {
+	if normalizedRunAs(username) == "root" {
 		return errors.New("refusing to run as root; set run_as to a non-root account")
 	}
 	return nil

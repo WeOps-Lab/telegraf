@@ -28,7 +28,8 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 #
 # Platform-enforced (not configurable in this plugin):
 #   - timeout is capped at interval-1s (default = cap; set interval >= 60s)
-#   - Linux: refuse to run as root; drop to run_as when Telegraf is root
+#   - Linux: empty run_as inherits the Telegraf process user (including root);
+#     explicit non-root run_as drops privileges; explicit root / uid 0 is refused
 #   - Linux: CPU / memory / process limits (cgroup v2 and/or setrlimit)
 #   - per-instance file lock (no overlapping runs)
 #   - script body is never placed in process argv
@@ -78,9 +79,10 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## Secrets for the child as "KEY=value". Do not put secrets in argv.
   # environment = ["TOKEN=secret"]
 
-  ## Linux: non-root account to run the script as. Required when Telegraf
-  ## is running as root. Names that resolve to uid 0 (including "root")
-  ## are refused at startup. Empty run_as never silently runs as root.
+  ## Linux: optional account to run the script as. Empty or blank inherits
+  ## the Telegraf process user, including root. Set a non-root account to
+  ## drop privileges when Telegraf is root. Names that resolve to uid 0
+  ## (including "root") are still refused at startup.
   ## Windows: ignored; run the Telegraf service under the desired account.
   # run_as = "telegraf"
 ```
@@ -94,17 +96,19 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 | `script` / `script_env` | Script body. Written to a private file; **not** in argv. |
 | `interpreter` / `params` | How the file is executed. |
 | `environment` | Secrets (`KEY=value`) for the child. |
-| `run_as` | Linux non-root user. Windows: not supported (service account). |
+| `run_as` | Linux: empty inherits the process user (including root); a non-root user drops privileges. Windows: not supported (service account). |
 
 ### Platform-enforced behavior (fixed)
 
 - **Timeout cap** = `interval - 1s`. Configured `timeout` cannot exceed this.
   Unset or `0` keeps that default (same as previous behavior). Exceeding the
   cap is clamped and logged once at Init.
-- **Linux root**: Init fails if the child would run as root: empty `run_as`
-  while Telegraf is root, `run_as = "root"`, or any account whose uid is 0.
-  There is no `allow_root` flag. When Telegraf is root, set `run_as` to a
-  non-root account; the child is launched with `setuid`/`setgid`.
+- **Linux `run_as`**: Empty or blank `run_as` inherits the Telegraf process
+  user, including root. There is still no `allow_root` flag: `run_as = "root"`
+  or any account whose uid is 0 is refused at Init. When Telegraf is root and
+  `run_as` is a non-root account, the child is launched with `setuid`/`setgid`.
+  A non-root Telegraf process with empty `run_as` stays that user and does not
+  escalate.
 - **Linux resource limits** (always applied, no disable flag):
   - memory: 256MiB (`cgroup v2 memory.max` when writable, plus `RLIMIT_AS`)
   - CPU time: `RLIMIT_CPU` equal to the effective timeout (seconds)
